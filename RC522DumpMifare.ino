@@ -1,5 +1,9 @@
 /*
  * Name RC522DumpMifare.ino
+ *
+ * 2013-07-xx started
+ * 2013-08-03 first commit
+ *
  * Based on code by www.electrodragon.com
  * and modified/fixed by http://twitter.com/regnerischerTag
  */
@@ -259,115 +263,6 @@ boolean selectCard(boolean dumpInfo)
  }
  return false;  
 }//selectCard
-
-/*
-void dumpMifareCard()
-{
-  uchar status;
-  boolean init = false;
-  uchar buffer[MAX_LEN];
-  uchar blockAddr = 0;	//Select operation buck address  0 - 63
-
-
-		//Search card, return card types
-		status = MFRC522_Request(PICC_REQIDL, buffer);//ShortFrame: 0x26 REQA (Request Type A)
-                //status = MFRC522_Request(PICC_REQALL, buffer);//0x52 WUPA (Wake-Up)
-		if (status == MI_OK)
-		{
-                        Serial.print("Card detected.\r\n ATQA:");
-                        dumpHex((char*)buffer, 2);
-                        Serial.println(" ");
-		}
-                else
-                {
-                    //Serial.print(".");
-                    //MFRC522_Init();
-                    return;
-                }
-
-		//Prevent conflict, return the 4 bytes Serial number of the card
-		status = MFRC522_Anticoll(buffer);
-		if (status == MI_OK)
-		{
-                    memcpy(serNum, buffer, 5);
-                    Serial.print(" UID: ");
-                    dumpHex((char*)serNum, 5);
-                    Serial.println("");
-                        
-                    uchar sak = 0;
-                    status = MFRC522_SelectTag(serNum, &sak);
-                    Serial.print(" SAK: ");
-                    Serial.print(sak, HEX);
-                    Serial.println("");
-                            
-                    if (status == MI_OK && ((sak & 0x04) == 0x00))
-                    {        
-                       if ((sak & 0x20) == 0x20)
-                       {
-                           //ISO/IEC FCD 14443-3: Table 9 — Coding of SAK 
-                           Serial.println("UID complete, PICC compliant with ISO/IEC 14443-4");
-                       }
-                       while( blockAddr < 200) 
-                       {
-                                
-                                  status = MFRC522_Auth(PICC_AUTHENT1A, blockAddr, defaultKeyA, serNum);	// Authentication
-                                  if (status != MI_OK)
-                                  {
-                                       
-                                       Serial.print("Auth2 ");
-                                       Serial.print(Read_MFRC522(Status2Reg), HEX);
-                                       status = MFRC522_Auth(PICC_AUTHENT1A, blockAddr, madKeyA, serNum);
-                                  }
-                                  if (status != MI_OK)
-                                  {
-                                       Serial.print("Auth3 ");
-                                       Serial.print(Read_MFRC522(Status2Reg), HEX);
-                                       status = MFRC522_Auth(PICC_AUTHENT1A, blockAddr, NDEFKeyA, serNum);
-                                  }
-                                  if (status == MI_OK)
-                                  {
-                                    	status = MFRC522_Read(blockAddr, buffer);
-                                        if (status == MI_OK)
-                                        {
-                                               if (blockAddr % 4 == 0) {
-                                                  Serial.print("Sector ");   
-                                                  Serial.print(blockAddr / 4, DEC);
-                                                  Serial.println(": ");
-                                                     
-                                                }
-                                               dumpHex((char*)buffer, MAX_LEN);
-                                        }
-                                        else
-                                        {
-                                            Serial.println("Read failed");
-                                            break;
-                                        }
-                                  } 
-                                  else
-                                  {
-                                       Serial.println("Auth failed");
-                                       break;
-                                  }
-                                  blockAddr++;
-                                }//while
-                                Serial.print(blockAddr * 16, DEC);
-                                Serial.println(" bytes");
-                            }
-                            else
-                            {
-                              //sak not ok   
-                              Serial.println("UID not complete");
-                            }
-                            //AntennaOff();
-                            //Serial.println("AntennaOff");
-                            //MFRC522_Init();
-                            //Serial.println("Init done");
-                            //delay(1000);
-		}//Anticoll            
-   //Serial.println("loop end");         
-}
-
-*/
 
 /*
  * Function：Write_MFRC5200
