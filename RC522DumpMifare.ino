@@ -3,9 +3,15 @@
  *
  * 2013-07-xx started
  * 2013-08-03 first commit
+ * 2013-08-08 anticol/select 7byte UID, RATS
  *
  * Based on code by www.electrodragon.com
  * and modified/fixed by http://twitter.com/regnerischerTag
+ *
+ * TODO: 
+ *  - ISO/IEC 14443-4
+ *  - Auth 7byte
+ *  
  */
 
 // the sensor communicates using SPI, so include the library:
@@ -127,8 +133,10 @@ const int NRSTPD = 5;
 #define     Reserved34			  0x3F
 //-----------------------------------------------
 
-//4 bytes Serial number of card, the 5 bytes is verfiy bytes
+//4 bytes Serial number of card, the 5th byte is crc
 uchar serNum[5];
+//7 bytes Serial number of card, the 8th byte is crc
+uchar serNum7[8];
 //buffer
 //uchar str[MAX_LEN];
 
@@ -197,13 +205,20 @@ void loop()
               else
               {
                   Serial.println("Auth failed");
+                  //TODO Mifare Ultra-Light
+                  //MIFARE Ultralight C http://www.nxp.com/documents/short_data_sheet/MF0ICU2_SDS.pdf
                   break;
               }
          }//for
          delay(1000);
     }
+    else
+    {
+        Serial.println("no card select");
+    }
     //reset/init for next loop
     MFRC522_Init();
+    delay(500);
 }
 
 boolean selectCard(boolean dumpInfo) 
@@ -226,40 +241,74 @@ boolean selectCard(boolean dumpInfo)
      if (status == MI_OK)
      {
          memcpy(serNum, buffer, 5);
-         if (dumpInfo)
-         {
-             Serial.print(" UID: ");
-             dumpHex((char*)serNum, 5);
-             Serial.println("");
-         }
-                        
          uchar sak = 0;
-         status = MFRC522_SelectTag(serNum, &sak);
-         if (dumpInfo)
-         {
-             Serial.print(" SAK: ");
-             Serial.print(sak, HEX);
-             Serial.println("");
-         }
-                            
+         status = MFRC522_SelectTag(serNum, &sak);                   
          if (status == MI_OK && ((sak & 0x04) == 0x00))
          {        
+             if (dumpInfo)
+             {
+                 Serial.print(" UID: ");
+                 dumpHex((char*)serNum, 4);
+                 Serial.println("");
+             }
              if ((sak & 0x20) == 0x20)
              {
                  //ISO/IEC FCD 14443-3: Table 9 — Coding of SAK
-                 if (dumpInfo)
-                     Serial.println("UID complete, PICC compliant with ISO/IEC 14443-4");
+                 //if (dumpInfo)
+                 //    Serial.println(" UID complete, PICC compliant with ISO/IEC 14443-4");
+                 //send RATS (Request for Answer To Select)
+                 uchar ats[MAX_LEN];
+                 uint unLen = 0;
+                 status = MFRC522_RATS(ats, &unLen);
+                 if (status == MI_OK && dumpInfo)
+                 {
+                      Serial.println(" ATS: ");
+                      dumpHex((char*)ats, ats[0]);
+                      Serial.println("");
+                 }
              }
+             if (dumpInfo)
+             {
+                 Serial.print(" SAK: ");
+                 Serial.print(sak, HEX);
+                 Serial.println("");
+             }     
              return true;
          }
          else
          {
-             //sak not ok
-             //TODO
-             if (dumpInfo)
-                 Serial.println("UID not complete");
+             //cascading level 2
+             memcpy(serNum7, &serNum[1], 3);//cascading L1
+             status = MFRC522_Anticoll2(buffer);
+             if (status == MI_OK)
+             {
+                 memcpy(&serNum7[3], buffer, 4);
+                 status = MFRC522_SelectTag2(&serNum7[3], &sak);
+                 if (dumpInfo)
+                 {
+                    Serial.print(" UID: ");
+                    dumpHex((char*)serNum7, 7);
+                    Serial.println("");
+                    Serial.print(" SAK: ");
+                    Serial.print(sak, HEX);
+                    Serial.println("");
+                 }
+                 return true;
+             }
+             else
+             {
+                 Serial.println("ANTICOLL error: cascading level 2");
+             }
          }
    }//Anticoll
+   else
+   {
+      Serial.print("ANTICOLL failed");
+   }
+ }
+ else
+ {
+     //Serial.print("-");
  }
  return false;  
 }//selectCard
@@ -426,7 +475,14 @@ uchar MFRC522_Request(uchar reqMode, uchar *TagType)
 
 	if ((status != MI_OK) || (backBits != 0x10))
 	{    
-		status = MI_ERR;
+	     status = MI_ERR;
+/*
+             Serial.print("status: ");
+             Serial.print(status, HEX);
+             Serial.print(" backBits: ");
+             Serial.print(backBits, HEX);
+             Serial.println("");
+*/             
 	}
 	return status;
 }
@@ -459,13 +515,13 @@ uchar MFRC522_ToCard(uchar command, uchar *sendData, uchar sendLen, uchar *backD
 			waitIRq = 0x10;
 			break;
 		}
-		case PCD_TRANSCEIVE:	//send data in the FIFO
+	case PCD_TRANSCEIVE:	//send data in the FIFO
 		{
 			irqEn = 0x77;
 			waitIRq = 0x30;
 			break;
 		}
-		default:
+	default:
 			break;
     }
    
@@ -502,7 +558,7 @@ uchar MFRC522_ToCard(uchar command, uchar *sendData, uchar sendLen, uchar *backD
     ClearBitMask(BitFramingReg, 0x80);			//StartSend=0
 	
     if (i != 0)
-    {    
+    {
         if(!(Read_MFRC522(ErrorReg) & 0x1B))	//BufferOvfl Collerr CRCErr ProtecolErr
         {
             status = MI_OK;
@@ -546,6 +602,10 @@ uchar MFRC522_ToCard(uchar command, uchar *sendData, uchar sendLen, uchar *backD
 	}
         
     }
+    else
+    {
+         //Serial.print("i=0");
+    }
 	
     //SetBitMask(ControlReg,0x80);           //timer stops
     //Write_MFRC522(CommandReg, PCD_IDLE); 
@@ -578,19 +638,77 @@ uchar MFRC522_Anticoll(uchar *serNum)
 
     if (status == MI_OK)
     {
-		//Verify card serial number
-		for (i=0; i<4; i++)
-		{   
-		 	serNumCheck ^= serNum[i];
-		}
-		if (serNumCheck != serNum[i])
-		{   
-			status = MI_ERR;    
-		}
+	 //Verify card serial number
+         for (i=0; i<4; i++)
+	 {    
+	     serNumCheck ^= serNum[i];
+	 }
+	 if (serNumCheck != serNum[i])
+	 {   
+	     status = MI_ERR;    
+	 }
     }
     //SetBitMask(CollReg, 0x80);		//ValuesAfterColl=1
     return status;
-} 
+}
+
+//ANTICOLL cascading level 2
+uchar MFRC522_Anticoll2(uchar *serNum)
+{
+    uchar status;
+    uchar i;
+    uchar serNumCheck=0;
+    uint unLen;
+    
+
+    //ClearBitMask(Status2Reg, 0x08);		//TempSensclear
+    //ClearBitMask(CollReg,0x80);		//ValuesAfterColl
+    Write_MFRC522(BitFramingReg, 0x00);		//TxLastBists = BitFramingReg[2..0]
+ 
+    serNum[0] = PICC_ANTICOLL2;
+    serNum[1] = 0x20;
+    status = MFRC522_ToCard(PCD_TRANSCEIVE, serNum, 2, serNum, &unLen);
+
+    if (status == MI_OK)
+    {
+	 //Verify card serial number
+         for (i=0; i<4; i++)
+	 {    
+	     serNumCheck ^= serNum[i];
+	 }
+	 if (serNumCheck != serNum[i])
+	 {   
+	     status = MI_ERR;    
+	 }
+    }
+    //SetBitMask(CollReg, 0x80);		//ValuesAfterColl=1
+    return status;
+}
+
+//send RATS and returns ATS
+uchar MFRC522_RATS(uchar *recvData, uint *pLen)
+{
+    uchar status;
+    uint unLen = 0;
+
+    recvData[0] = 0xE0; // RATS
+    recvData[1] = 0x50; // FSD=128, CID=0
+    CalulateCRC(recvData,2, &recvData[2]);
+    status = MFRC522_ToCard(PCD_TRANSCEIVE, recvData, 4, recvData, &unLen);
+    /*
+    Serial.print("unLen: ");
+    Serial.print(unLen, HEX);
+    /*Serial.print(" status: ");
+    Serial.print(status, HEX);
+    Serial.println("");
+    */
+    //TODO
+    //if ((status != MI_OK) || (unLen != 0x90))
+    //{
+    //    status = MI_ERR;
+    //}
+    return status;
+}
 
 
 /*
@@ -640,10 +758,10 @@ uchar MFRC522_SelectTag(uchar *serNum, uchar *sak)
 {
     uchar i;
     uchar status;
-    uchar size;
+    //uchar size;
     uint recvBits;
     uchar buffer[9];
-    uchar buffCheck=0; 
+    //uchar buffCheck=0; 
 
     //ClearBitMask(Status2Reg, 0x08);			//MFCrypto1On=0
 
@@ -654,6 +772,49 @@ uchar MFRC522_SelectTag(uchar *serNum, uchar *sak)
     	buffer[i+2] = *(serNum+i);
     }
     CalulateCRC(buffer, 7, &buffer[7]);		//??
+    status = MFRC522_ToCard(PCD_TRANSCEIVE, buffer, 9, buffer, &recvBits);
+    //TODO: the above call returns 2 instead of MI_OK -> why?
+    status = MI_OK;
+    //Serial.print("recvBits: ");
+    //Serial.print(recvBits, DEC);
+    /*
+    for (i=0; i<recBits / 8; i++)
+    {
+    	buff[i] = *(buffer+i);
+    }*/
+    //dumpHex((char*)buffer, recvBits / 8);
+    *sak = buffer[0];
+    //Verify received buffer
+    /* TODO
+    for (i=0; i< recvBits/8; i++)
+    {   
+       buffCheck ^= buffer[i];
+    }
+    if (buffCheck != buffer[i])
+    {   
+       status = MI_ERR;    
+    }*/
+    return status;
+}
+
+uchar MFRC522_SelectTag2(uchar *serNum, uchar *sak)
+{
+    uchar i;
+    uchar status;
+    //uchar size;
+    uint recvBits;
+    uchar buffer[9];
+    //uchar buffCheck=0; 
+
+    //ClearBitMask(Status2Reg, 0x08);			//MFCrypto1On=0
+
+    buffer[0] = PICC_ANTICOLL2;
+    buffer[1] = 0x70;
+    for (i=0; i<5; i++)
+    {
+    	buffer[i+2] = *(serNum+i);
+    }
+    CalulateCRC(buffer, 7, &buffer[7]);
     status = MFRC522_ToCard(PCD_TRANSCEIVE, buffer, 9, buffer, &recvBits);
     //TODO: the above call returns 2 instead of MI_OK -> why?
     status = MI_OK;
@@ -696,24 +857,24 @@ uchar MFRC522_Auth(uchar authMode, uchar BlockAddr, uchar *Sectorkey, uchar *ser
     uchar status;
     uint recvBits;
     uchar i;
-	uchar buff[12]; 
+    uchar buff[12]; 
 
-	//Verify command + block address + buffer password + card SN
+    //Verify command + block address + buffer password + card SN
     buff[0] = authMode;
     buff[1] = BlockAddr;
     for (i=0; i<6; i++)
     {    
-		buff[i+2] = *(Sectorkey+i);   
-	}
+        buff[i+2] = *(Sectorkey+i);   
+    }
     for (i=0; i<4; i++)
     {    
-		buff[i+8] = *(serNum+i);   
-	}
+        buff[i+8] = *(serNum+i);   
+    }
     status = MFRC522_ToCard(PCD_AUTHENT, buff, 12, buff, &recvBits);
 
     if ((status != MI_OK) || (!(Read_MFRC522(Status2Reg) & 0x08)))
     {   
-		status = MI_ERR;   
+        status = MI_ERR;   
     }
     
     return status;
@@ -785,7 +946,6 @@ uchar MFRC522_Write(uchar blockAddr, uchar *writeData)
     
     return status;
 }
-
 
 /*
  * Function：MFRC522_Halt
